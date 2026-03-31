@@ -153,6 +153,12 @@ def main():
     parser.add_argument(
         "--ops-demo", action="store_true", help="Run ops agent demo (single cycle)"
     )
+    parser.add_argument(
+        "--web", action="store_true", help="Run web site manager agent (continuous)"
+    )
+    parser.add_argument(
+        "--web-demo", action="store_true", help="Run web manager demo (single cycle)"
+    )
     args = parser.parse_args()
 
     config_path = os.path.join(
@@ -452,6 +458,43 @@ def main():
         except KeyboardInterrupt:
             print(f"\n  Shutting down...")
             ops.stop()
+        return
+
+    if args.web or args.web_demo:
+        from saas.database import Database
+        from saas.web_manager import WebManager
+
+        db = Database()
+        client = OllamaClient(
+            host=host,
+            model=model,
+            sidecar_model=sidecar_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            context_window=context_window,
+        )
+
+        print(
+            f"\n{Colors.BOLD}vibe-local Web Manager{Colors.RESET} — Autonomous Website Management"
+        )
+        print(f"  Model: {model}")
+        print(f"  Site dir: ~/dev/vibe-local/website")
+        print(f"  Deploy: Cloudflare Pages (git push → auto deploy)\n")
+
+        web = WebManager(db=db, client=client)
+
+        if args.web_demo:
+            print(f"  {Colors.YELLOW}DEMO MODE — single cycle{Colors.RESET}\n")
+            web.run_full_cycle()
+            return
+
+        print(f"  {Colors.GREEN}Web Manager running. Ctrl+C to stop.{Colors.RESET}")
+        try:
+            while True:
+                web.run_full_cycle()
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            print(f"\n  Shutting down...")
         return
 
     print(
