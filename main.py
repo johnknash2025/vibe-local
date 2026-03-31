@@ -149,6 +149,10 @@ def main():
         action="store_true",
         help="Run SaaS demo (auto-create users + test requests)",
     )
+    parser.add_argument("--ops", action="store_true", help="Run autonomous ops agent")
+    parser.add_argument(
+        "--ops-demo", action="store_true", help="Run ops agent demo (single cycle)"
+    )
     args = parser.parse_args()
 
     config_path = os.path.join(
@@ -375,6 +379,79 @@ def main():
             print(f"\n  Shutting down...")
             worker.stop()
             server.shutdown()
+        return
+
+    if args.ops or args.ops_demo:
+        from saas.database import Database
+        from saas.ops_agent import OpsAgent
+
+        db = Database()
+        client = OllamaClient(
+            host=host,
+            model=model,
+            sidecar_model=sidecar_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            context_window=context_window,
+        )
+
+        print(
+            f"\n{Colors.BOLD}vibe-local Ops Agent{Colors.RESET} — Autonomous SaaS Operations"
+        )
+        print(f"  Model: {model}")
+        print(
+            f"  Modules: monitor, recovery, reports, support, content, seo, billing\n"
+        )
+
+        ops = OpsAgent(db=db, client=client)
+
+        if args.ops_demo:
+            print(f"  {Colors.YELLOW}DEMO MODE — single cycle run{Colors.RESET}\n")
+            checks = ops.monitor.run_all_checks()
+            alerts = ops.monitor.evaluate_alerts(checks)
+            for alert in alerts:
+                result = ops.recovery.handle_alert(alert)
+                ops._log("recovery", f"{alert['message']} → {result['status']}")
+
+            report = ops.reporter.generate_daily_report()
+            print(f"\n  {Colors.CYAN}Daily Report:{Colors.RESET}")
+            print(f"  {report.get('ai_summary', 'N/A')[:300]}")
+
+            topics = ops.seo.suggest_content_topics()
+            print(f"\n  {Colors.CYAN}SEO Topics:{Colors.RESET}")
+            print(f"  {str(topics)[:200]}")
+
+            post = ops.content.generate_blog_post("AIエージェントの未来")
+            if "content" in post:
+                print(
+                    f"\n  {Colors.CYAN}Blog Post Generated:{Colors.RESET} {post['word_count']} words"
+                )
+
+            result = ops.billing.auto_topup_low_credits(threshold=50, amount=100)
+            if result["topped_up"]:
+                print(
+                    f"\n  {Colors.CYAN}Billing:{Colors.RESET} Auto topup: {', '.join(result['topped_up'])}"
+                )
+
+            support_test = ops.support.process_inquiry("How do I reset my password?")
+            print(f"\n  {Colors.CYAN}Customer Support Test:{Colors.RESET}")
+            print(f"  Q: How do I reset my password?")
+            print(f"  A: {support_test['response'][:150]}")
+            print(f"  Source: {support_test['source']}")
+
+            print(
+                f"\n  {Colors.GREEN}Ops demo complete! All modules working.{Colors.RESET}"
+            )
+            print(f"  Total ops log entries: {len(ops.ops_log)}\n")
+            return
+
+        ops.start()
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print(f"\n  Shutting down...")
+            ops.stop()
         return
 
     print(
