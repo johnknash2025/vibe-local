@@ -256,10 +256,65 @@ RULES:
 
         self.optimize_seo()
         self.update_landing_page()
+        self.update_blog_index()
 
         topics = ["AIエージェントの最新トレンド2026", "ローカルAIのメリットと活用法"]
         for topic in topics:
             self.generate_blog_post(topic)
 
+        self.update_blog_index()
+
         self._log("complete", f"Cycle done. {len(self.ops_log)} operations logged.")
         return self.ops_log
+
+    def update_blog_index(self):
+        """Update the blog listing on the main page."""
+        posts = []
+        if os.path.isdir(self.blog_dir):
+            for f in sorted(os.listdir(self.blog_dir), reverse=True):
+                if f.endswith(".html"):
+                    filepath = os.path.join(self.blog_dir, f)
+                    with open(filepath, "r", encoding="utf-8") as pf:
+                        content = pf.read()
+                    title_match = re.search(r"<title>(.*?)</title>", content)
+                    desc_match = re.search(
+                        r'<meta\s+name="description"\s+content="(.*?)"', content
+                    )
+                    date_match = re.match(r"(\d{4}-\d{2}-\d{2})", f)
+                    posts.append(
+                        {
+                            "title": title_match.group(1).replace(" — vibe-local", "")
+                            if title_match
+                            else f,
+                            "date": date_match.group(1) if date_match else "Unknown",
+                            "desc": desc_match.group(1) if desc_match else "",
+                            "url": f"/blog/{f}",
+                        }
+                    )
+
+        index_path = os.path.join(self.site_dir, "index.html")
+        if not os.path.isfile(index_path):
+            return
+
+        with open(index_path, "r", encoding="utf-8") as f:
+            html = f.read()
+
+        blog_html = ""
+        for p in posts[:6]:
+            blog_html += f"""
+                <div class="blog-post">
+                    <div class="date">{p["date"]}</div>
+                    <h3><a href="{p["url"]}">{p["title"]}</a></h3>
+                    <p>{p["desc"]}</p>
+                </div>"""
+
+        if blog_html:
+            html = re.sub(
+                r'<div id="blog-posts">.*?</div>\s*</div>',
+                f'<div id="blog-posts">{blog_html}\n            </div>',
+                html,
+                flags=re.DOTALL,
+            )
+            with open(index_path, "w", encoding="utf-8") as f:
+                f.write(html)
+            self._log("blog-index", f"Updated blog index ({len(posts)} posts)")
