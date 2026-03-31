@@ -239,7 +239,7 @@ def _debug_summary(req_id, model, msg_count, mode, elapsed_ms, ok, stop_reason=N
     status = "OK" if ok else "FAIL"
     parts = [f"[debug] #{req_id:04d}", model, f"msgs={msg_count}", mode, f"{elapsed_ms}ms", status]
     if stop_reason:
-        parts.append(f"stop={stop_reason}")
+        parts.append(f"tools=[{','.join(tools)}]")s.append(f"tools=[{','.join(tools)}]")s.append(f"tools={tools}")s.append(f"stop={stop_reason}")
     if tools:
         parts.append(f"tools=[{','.join(tools)}]")
     print(" ".join(parts), file=sys.stderr)

@@ -17,6 +17,7 @@ import json
 import os
 import sys
 import signal
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -141,6 +142,13 @@ def main():
     parser.add_argument("--max-tokens", type=int, help="Max output tokens")
     parser.add_argument("--temperature", type=float, help="Sampling temperature")
     parser.add_argument("--context-window", type=int, help="Context window size")
+    parser.add_argument("--saas", action="store_true", help="Run SaaS platform mode")
+    parser.add_argument("--saas-port", type=int, default=8787, help="SaaS API port")
+    parser.add_argument(
+        "--saas-demo",
+        action="store_true",
+        help="Run SaaS demo (auto-create users + test requests)",
+    )
     args = parser.parse_args()
 
     config_path = os.path.join(
@@ -245,6 +253,128 @@ def main():
         if ctx:
             prompt += f"\n\n{ctx}"
         engine.run(system_prompt=prompt, user_message=args.prompt)
+        return
+
+    if args.saas or args.saas_demo:
+        from saas.database import Database
+        from saas.api_server import run_api_server
+        from saas.worker import Worker
+
+        db = Database()
+        client = OllamaClient(
+            host=host,
+            model=model,
+            sidecar_model=sidecar_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            context_window=context_window,
+        )
+
+        print(
+            f"\n{Colors.BOLD}vibe-local SaaS{Colors.RESET} — Local AI Service Platform"
+        )
+        print(f"  Model: {model}")
+        print(f"  Port: {args.saas_port}")
+        print(
+            f"  Services: {', '.join(['content-gen', 'data-analysis', 'translate', 'faq-bot', 'summarize', 'code-review'])}\n"
+        )
+
+        if args.saas_demo:
+            print(
+                f"  {Colors.YELLOW}DEMO MODE — creating test users and requests{Colors.RESET}\n"
+            )
+
+        server, queue = run_api_server(port=args.saas_port, db=db, client=client)
+
+        worker = Worker(db=db, client=client, poll_interval=0.5)
+        worker.start()
+
+        demo_request_count = 0
+        if args.saas_demo:
+            import urllib.request as ureq
+
+            u1 = db.create_user("demo-user", "demo@example.com", "free", 100)
+            u2 = db.create_user("test-corp", "test@corp.jp", "pro", 500)
+            print(f"  Created user: {u1['name']} (API key: {u1['api_key']})")
+            print(f"  Created user: {u2['name']} (API key: {u2['api_key']})")
+
+            db.add_faq(
+                "my-product",
+                "How do I reset my password?",
+                "Go to Settings > Security > Reset Password.",
+            )
+            db.add_faq(
+                "my-product",
+                "What payment methods do you accept?",
+                "We accept credit cards, PayPal, and bank transfer.",
+            )
+            db.add_faq(
+                "my-product",
+                "How do I cancel my subscription?",
+                "Contact support or go to Settings > Billing > Cancel.",
+            )
+
+            api_key = u1["api_key"]
+
+            demo_requests = [
+                ("content-gen", {"input": "Write a short blog post about AI in 2026"}),
+                (
+                    "translate",
+                    {"input": "Hello, how are you today? Please translate to Japanese"},
+                ),
+                (
+                    "summarize",
+                    {
+                        "input": "Artificial intelligence has transformed industries worldwide. Machine learning models can now process vast amounts of data in seconds. Companies are adopting AI for customer service, content creation, and data analysis. The technology continues to evolve rapidly with new models released monthly."
+                    },
+                ),
+                (
+                    "data-analysis",
+                    {
+                        "input": "Analyze this sales data:\nMonth,Revenue\nJan,1000\nFeb,1200\nMar,900\nApr,1500\nMay,1800\nJun,2000"
+                    },
+                ),
+            ]
+            demo_request_count = len(demo_requests)
+
+            for slug, data in demo_requests:
+                try:
+                    body = json.dumps(data).encode("utf-8")
+                    req = ureq.Request(
+                        f"http://localhost:{args.saas_port}/api/v1/{slug}",
+                        data=body,
+                        headers={
+                            "X-API-Key": api_key,
+                            "Content-Type": "application/json",
+                        },
+                        method="POST",
+                    )
+                    resp = ureq.urlopen(req, timeout=10)
+                    result = json.loads(resp.read())
+                    print(f"  Queued: {slug} → {result.get('request_id', '?')}")
+                except Exception as e:
+                    print(f"  Error queuing {slug}: {e}")
+
+            print(
+                f"\n  {Colors.GREEN}Demo requests queued. Worker is processing...{Colors.RESET}"
+            )
+            print(f"  Dashboard: http://localhost:{args.saas_port}\n")
+
+        try:
+            while True:
+                time.sleep(1)
+                stats = worker.stats()
+                if args.saas_demo and stats["processed"] >= demo_request_count:
+                    print(
+                        f"\n  {Colors.GREEN}Demo complete! {stats['processed']} requests processed.{Colors.RESET}"
+                    )
+                    print(f"  Dashboard: http://localhost:{args.saas_port}")
+                    print(f"  Press Ctrl+C to exit\n")
+                    break
+        except KeyboardInterrupt:
+            print(f"\n  Shutting down...")
+            worker.stop()
+            server.shutdown()
         return
 
     print(
